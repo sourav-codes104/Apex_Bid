@@ -2,6 +2,10 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from database import db, socketio
 from dotenv import load_dotenv
+
+import eventlet
+eventlet.monkey_patch()   # 🔥 REQUIRED FOR WEBSOCKETS
+
 load_dotenv()
 
 # Routes
@@ -24,44 +28,28 @@ def create_app():
 
     db.init_app(app)
 
-    # ----------------------------------------------------
-    # FIXED CORS
-    # ----------------------------------------------------
+    # ALLOW ALL ORIGINS DURING DEV FOR SOCKET.IO
     CORS(
         app,
         supports_credentials=True,
-        origins=[
-            "http://localhost:8081",
-            "http://127.0.0.1:8081",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        ],
+        resources={r"/*": {"origins": "*"}},
+        allow_headers=["Content-Type", "Authorization"],
+        expose_headers=["Authorization"],
     )
 
-    # ----------------------------------------------------
-    # FIXED SOCKET.IO CORS (NO "*")
-    # ----------------------------------------------------
-    socketio.init_app(app, cors_allowed_origins=[
-        "http://localhost:8081",
-        "http://127.0.0.1:8081",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ])
+    # SOCKET.IO → ALLOW ALL ORIGINS FOR DEV
+    socketio.init_app(
+        app,
+        cors_allowed_origins="*",
+        async_mode="eventlet",     # 🔥 REQUIRED
+        ping_timeout=60,
+        ping_interval=25,
+    )
 
-    @app.after_request
-    def after_request(response):
-        response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, Authorization"
-        )
-        response.headers["Access-Control-Allow-Methods"] = (
-            "GET, POST, PUT, DELETE, OPTIONS"
-        )
-        return response
-
-    # Routes
+    # ROUTES
     app.register_blueprint(property_bp, url_prefix="/api/properties")
     app.register_blueprint(auction_bp, url_prefix="/api/auctions")
-    app.register_blueprint(auction_join_bp, url_prefix="/api/auction-join")
+    app.register_blueprint(auction_join_bp, url_prefix="/api/auctions")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(payments, url_prefix="/payments")
     app.register_blueprint(payment_check_bp, url_prefix="/payments")
@@ -80,5 +68,10 @@ if __name__ == "__main__":
     with app.app_context():
         db.create_all()
 
-    socketio.run(app, host="127.0.0.1", port=5000, debug=True)
-
+    # USE EVENTLET SERVER, NOT WERKZEUG
+    socketio.run(
+        app,
+        host="127.0.0.1",
+        port=5000,
+        debug=True
+    )

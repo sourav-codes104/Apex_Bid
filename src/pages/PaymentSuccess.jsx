@@ -1,7 +1,6 @@
 import { useEffect } from "react";
-import axios from "axios";
+import axios from "@/lib/axios"; // ✅ USE YOUR AXIOS INSTANCE
 import { useNavigate, useLocation } from "react-router-dom";
-import { connectAuctionSocket } from "@/socket/auctionSocket";
 import { useAuctionStore } from "@/stores/auctionStore";
 
 const PaymentSuccess = () => {
@@ -14,51 +13,32 @@ const PaymentSuccess = () => {
     const orderId = params.get("order_id");
 
     if (!orderId) {
-      console.error("No order_id found in URL");
+      console.error("No order_id found");
       return;
     }
 
     const verifyPayment = async () => {
       try {
-        // -------------------------------
-        // 1) VERIFY PAYMENT WITH BACKEND
-        // -------------------------------
-        const verifyRes = await axios.post(
-          "http://127.0.0.1:5000/payments/verify-payment",
-          { order_id: orderId }
-        );
+        // STEP 1 → Verify payment
+        const verifyRes = await axios.post("/payments/verify-payment", {
+          order_id: orderId,
+        });
 
         const { auction_id, order_status } = verifyRes.data;
 
         if (order_status !== "PAID") {
-          alert("Payment verification failed.");
+          alert("Payment failed");
           return navigate("/auctions");
         }
 
-        // -------------------------------
-        // 2) JOIN AUCTION AFTER PAID
-        // -------------------------------
-        const token = localStorage.getItem("token");
+        // STEP 2 → Join auction AFTER paid
+        const joinRes = await axios.post(`/api/auctions/${auction_id}/join`);
 
-        const joinRes = await axios.post(
-          `http://127.0.0.1:5000/api/auctions/${auction_id}/join`,
-          {},
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-
-        // Save auction data to zustand
+        // Save to Zustand
         setAuctionInfo(joinRes.data);
 
-        // -------------------------------
-        // 3) CONNECT SOCKET & JOIN ROOM
-        // -------------------------------
-        const socket = connectAuctionSocket(token);
-        socket.emit("join_auction", { auction_id });
-
-        // -------------------------------
-        // 4) REDIRECT TO LIVE AUCTION
-        // -------------------------------
-        navigate(`/auctions/${auction_id}/live`);
+        // STEP 3 → Redirect to correct Live Auction Route
+        navigate(`/auction/live/${auction_id}`);
 
       } catch (err) {
         console.error("Payment verification error:", err);

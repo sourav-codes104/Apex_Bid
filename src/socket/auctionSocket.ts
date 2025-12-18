@@ -1,85 +1,88 @@
 import { io, Socket } from "socket.io-client";
 import { useAuctionStore } from "@/stores/auctionStore";
-import { toast } from "sonner";   // 🔥 Add toast for real-time alerts
+import { toast } from "sonner";
 
 let socket: Socket | null = null;
 
 export const connectAuctionSocket = (token: string) => {
-  // Prevent duplicate sockets
+  // Avoid duplicate socket connections
   if (socket) return socket;
 
   socket = io("http://127.0.0.1:5000", {
-    transports: ["websocket"],
-    auth: { token },
+    transports: ["websocket", "polling"],   // IMPORTANT: allow fallback
+    extraHeaders: {
+      Authorization: `Bearer ${token}`,      // IMPORTANT: backend requires this
+    },
   });
 
-  console.log("🔌 Auction socket connected:", socket.id);
+  console.log("🔌 Connecting auction socket…");
 
   // ----------------------------------------------------
-  // 1️⃣ PARTICIPANT UPDATE
+  // 1️⃣ PARTICIPANT UPDATE (backend sends: participants)
   // ----------------------------------------------------
   socket.on("participant_update", (data) => {
     console.log("👥 participant_update:", data);
 
-    if (typeof data.count === "number") {
-      useAuctionStore.getState().updateParticipants(data.count);
+    if (typeof data.participants === "number") {
+      useAuctionStore.getState().updateParticipants(data.participants);
     }
   });
 
   // ----------------------------------------------------
-  // 2️⃣ NEW BID UPDATE (LIVE REAL-TIME)
+  // 2️⃣ NEW BID UPDATE (backend sends corrected keys)
   // ----------------------------------------------------
   socket.on("new_bid", (data) => {
     console.log("💰 new_bid:", data);
 
-    const { amount, bidder_id, bidder_name } = data;
+    const {
+      current_bid,
+      current_bidder_id,
+      current_bidder_name,
+    } = data;
 
     const store = useAuctionStore.getState();
-    const prevAuction = store.auction;
+    const prev = store.auction;
 
-    // Apply store update
-    store.applyNewBid(amount, bidder_id, bidder_name);
+    store.applyNewBid(
+      current_bid,
+      current_bidder_id,
+      current_bidder_name
+    );
 
-    // -------------------------
-    // 🔥 NOTIFICATIONS (VERY IMPORTANT)
-    // -------------------------
+    if (!prev) return;
 
-    if (!prevAuction) return;
-
-    // The user who placed this bid becomes highest bidder
-    if (prevAuction.currentBidderId === bidder_id) {
+    // 🔔 Feedback to user
+    if (current_bidder_id === store.userId) {
       toast.success("🎉 You are now the highest bidder!");
-    }
-
-    // Another user has outbid YOU
-    else if (
-      prevAuction.currentBidderId !== null &&
-      prevAuction.currentBidderId !== bidder_id
-    ) {
+    } else {
       toast.error("⚠️ You have been outbid!");
     }
   });
 
   // ----------------------------------------------------
-  // 3️⃣ TIMER SYNC UPDATE
+  // 3️⃣ TIMER SYNC (backend sends: remaining_seconds)
   // ----------------------------------------------------
   socket.on("timer_update", (data) => {
     console.log("⏳ timer_update:", data);
 
-    if (typeof data.remaining === "number") {
-      useAuctionStore.getState().updateTimer(data.remaining);
+    if (typeof data.remaining_seconds === "number") {
+      useAuctionStore.getState().updateTimer(data.remaining_seconds);
     }
   });
 
   // ----------------------------------------------------
-  // 4️⃣ AUCTION END UPDATE
+  // 4️⃣ AUCTION ENDED
   // ----------------------------------------------------
   socket.on("auction_ended", (data) => {
     console.log("🏁 auction_ended:", data);
 
     useAuctionStore
       .getState()
-      .setAuctionEnded(data.final_price, data.winner_id, data.winner_name);
+      .setAuctionEnded(
+        data.final_price,
+        data.winner_id,
+        data.winner_name,
+      );
 
     toast.info(
       `🏁 Auction Ended — Winner: ${
@@ -92,19 +95,20 @@ export const connectAuctionSocket = (token: string) => {
   // CONNECTION LOGGING
   // ----------------------------------------------------
   socket.on("connect", () => {
-    console.log("🟢 Socket Connected:", socket?.id);
+    console.log("🟢 Socket connected:", socket?.id);
   });
 
   socket.on("disconnect", () => {
-    console.log("🔴 Socket Disconnected");
+    console.log("🔴 Socket disconnected");
   });
 
   socket.on("connect_error", (err) => {
-    console.error("❌ Socket Connection Error:", err);
-    toast.error("Socket connection failed");
+    console.error("❌ Socket connection error:", err.message);
+    toast.error("Could not connect to auction server");
   });
 
   return socket;
 };
+
 
 export const getAuctionSocket = () => socket;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import Layout from "@/components/layout/Layout";
 
@@ -26,10 +26,13 @@ const LiveAuction = () => {
   const token = localStorage.getItem("token");
 
   const setAuctionInfo = useAuctionStore((s) => s.setAuctionInfo);
+  const updateParticipants = useAuctionStore((s) => s.updateParticipants); // implement in store if not present
+  const addBidToHistory = useAuctionStore((s) => s.addBidToHistory); // implement if not present
   const auction = useAuctionStore((s) => s.auction);
   const user = useAuthStore((s) => s.user);
 
   const [hasPaid, setHasPaid] = useState(false);
+  const socketRef = useRef<any>(null);
 
   // ---------------------------------------------------
   // STEP 1 → LOAD AUCTION DETAILS FIRST
@@ -39,16 +42,24 @@ const LiveAuction = () => {
       try {
         const res = await axios.get(`/api/auctions/${id}`);
         setAuctionInfo(res.data);
+
+        // If auction doesn't require entry fee, mark as paid locally and join
+        if (!res.data.entry_fee_required) {
+          setHasPaid(true);
+          // joinAuction will run via effect below because hasPaid changes OR call directly:
+          await joinAuctionIfNeeded(res.data);
+        }
       } catch (err) {
         console.error("Failed to load auction:", err);
       }
     };
 
     if (id) loadAuction();
-  }, [id]); // only id
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   // ---------------------------------------------------
-  // STEP 2 → CHECK PAYMENT STATUS
+  // STEP 2 → CHECK PAYMENT STATUS (and join if paid)
   // ---------------------------------------------------
   useEffect(() => {
     if (!user || !id) return;
@@ -56,10 +67,9 @@ const LiveAuction = () => {
     const checkPayment = async () => {
       try {
         const res = await axios.get(`/payments/check/${id}/${user.id}`);
-
         if (res.data.paid === true) {
           setHasPaid(true);
-          joinAuction();
+          await joinAuctionIfNeeded(auction); // join with current auction info
         }
       } catch (err) {
         console.error("Payment check error:", err);
@@ -67,30 +77,88 @@ const LiveAuction = () => {
     };
 
     checkPayment();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, user]);
 
   // ---------------------------------------------------
-  // STEP 3 → JOIN AUCTION
+  // JOIN LOGIC (single function, idempotent)
   // ---------------------------------------------------
-  const joinAuction = async () => {
+  const joinAuctionIfNeeded = async (loadedAuction?: any) => {
+    // If already connected, skip
+    if (socketRef.current) return;
+
     try {
-      const res = await axios.post(
-        `/api/auctions/${id}/join`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      // If we don't have loadedAuction data, fetch it
+      let data = loadedAuction;
+      if (!data) {
+        const res = await axios.get(`/api/auctions/${id}`);
+        data = res.data;
+        setAuctionInfo(data);
+      }
 
-      setAuctionInfo(res.data);
+      // If entry fee required and not paid, do not join
+      if (data.entry_fee_required && !hasPaid) {
+        return;
+      }
 
+      // Call join endpoint (axios instance adds token if present)
+      const joinRes = await axios.post(`/api/auctions/${id}/join`);
+      setAuctionInfo(joinRes.data);
+
+      // Connect socket once and set listeners
       const socket = connectAuctionSocket(token);
+      socketRef.current = socket;
+
+      // Emit join event (server should add socket to room and broadcast participant updates)
       socket.emit("join_auction", { auction_id: Number(id) });
+
+      // --- LISTENERS: update Zustand / UI on events ---
+      socket.on("participant_update", (payload: any) => {
+        // payload should include participants count or full list
+        if (payload && typeof payload.participants !== "undefined") {
+          updateParticipants(payload.participants);
+          // Also update auction in store (so count shown comes from store)
+          setAuctionInfo({ ...joinRes.data, participants: payload.participants });
+        }
+      });
+
+      socket.on("new_bid", (payload: any) => {
+        // payload expected: { current_bid, current_bidder_id, bid, bidder_name, bid_time }
+        if (!payload) return;
+        // Update auction info
+        setAuctionInfo({
+          ...joinRes.data,
+          current_bid: payload.current_bid,
+          current_bidder_id: payload.current_bidder_id,
+          current_bidder_name: payload.current_bidder_name,
+        });
+        // Push to bid history in store
+        addBidToHistory(payload);
+      });
+
+      socket.on("timer_update", (payload: any) => {
+        // payload: { remaining_seconds }
+        setAuctionInfo((prev: any) => ({
+          ...prev,
+          remaining_seconds: payload.remaining_seconds,
+        }));
+      });
+
+      socket.on("auction_ended", (payload: any) => {
+        setAuctionInfo((prev: any) => ({ ...prev, status: "ended" }));
+      });
+
+      socket.on("connect_error", (err: any) => {
+        console.error("Socket connect error:", err);
+      });
+
     } catch (err) {
       console.error("Join auction failed:", err);
     }
   };
 
   // ---------------------------------------------------
-  // STEP 4 → PAYMENT
+  // STEP 4 → PAYMENT (unchanged, uses axios instance)
   // ---------------------------------------------------
   const handlePayEntryFee = async () => {
     try {
@@ -119,6 +187,25 @@ const LiveAuction = () => {
   };
 
   // ---------------------------------------------------
+  // CLEANUP socket on unmount
+  // ---------------------------------------------------
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        try {
+          socketRef.current.emit("leave_auction", { auction_id: Number(id) });
+          socketRef.current.disconnect();
+        } catch (e) {
+          console.warn("Error during socket cleanup", e);
+        } finally {
+          socketRef.current = null;
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  // ---------------------------------------------------
   // UI HANDLING
   // ---------------------------------------------------
   if (!auction) {
@@ -132,13 +219,12 @@ const LiveAuction = () => {
   return (
     <Layout>
       <div className="container py-8 space-y-6">
-
         <LiveAuctionHeader />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-4">
             {/* NOT PAID → SHOW ENTRY FEE BUTTON */}
-            {!hasPaid && (
+            {!hasPaid && auction.entry_fee > 0 && (
               <button
                 onClick={handlePayEntryFee}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg"
@@ -148,7 +234,7 @@ const LiveAuction = () => {
             )}
 
             {/* PAID → SHOW BIDDING UI */}
-            {hasPaid && (
+            {(hasPaid || auction.entry_fee === 0) && (
               <>
                 <CountdownTimer />
                 <BidInputBox />
@@ -156,7 +242,7 @@ const LiveAuction = () => {
             )}
           </div>
 
-          {/* FIXED PARTICIPANTS COUNTER */}
+          {/* PARTICIPANTS COUNTER */}
           <ParticipantsCounter count={auction?.participants ?? 0} />
         </div>
 

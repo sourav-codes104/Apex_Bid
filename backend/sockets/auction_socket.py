@@ -13,7 +13,7 @@ user_rooms = {}  # { sid: (user_id, auction_id) }
 def init_auction_socket(socketio):
 
     # ============================================================
-    # JOIN AUCTION (NO NAMESPACE)
+    # JOIN AUCTION
     # ============================================================
     @socketio.on("join_auction")
     def join_auction(data):
@@ -40,9 +40,18 @@ def init_auction_socket(socketio):
         auction.participants += 1
         db.session.commit()
 
-        # Send initial info to user
-        emit("participant_update", {"count": auction.participants}, room=room)
+        # -------
+        # SEND PARTICIPANT UPDATE (CORRECT PAYLOAD)
+        # -------
+        socketio.emit(
+            "participant_update",
+            {"participants": auction.participants},
+            room=room
+        )
 
+        # -------
+        # SEND INITIAL AUCTION INFO
+        # -------
         emit(
             "auction_info",
             {
@@ -53,7 +62,7 @@ def init_auction_socket(socketio):
                 "current_bidder_name": (
                     auction.current_bidder.name if auction.current_bidder else None
                 ),
-                "remaining": get_remaining_seconds(auction),
+                "remaining_seconds": get_remaining_seconds(auction),
                 "participants": auction.participants,
             },
             room=request.sid,
@@ -94,14 +103,18 @@ def init_auction_socket(socketio):
 
         room = f"auction_{auction_id}"
 
-        # Broadcast new bid (frontend listens to "new_bid")
+        # -------
+        # SEND NEW BID (CORRECT PAYLOAD)
+        # -------
         socketio.emit(
             "new_bid",
             {
                 "auction_id": auction_id,
-                "amount": bid_amount,
-                "bidder_id": user_id,
-                "bidder_name": auction.current_bidder.name if auction.current_bidder else None,
+                "current_bid": bid_amount,
+                "current_bidder_id": user_id,
+                "current_bidder_name": (
+                    auction.current_bidder.name if auction.current_bidder else None
+                ),
             },
             room=room,
         )
@@ -117,12 +130,12 @@ def init_auction_socket(socketio):
             return
 
         auction = refresh_auction_status(auction)
-
         remaining = get_remaining_seconds(auction)
 
-        # If auction ended, broadcast end event
+        room = f"auction_{auction_id}"
+
+        # Auction ended?
         if auction.status == "ended":
-            room = f"auction_{auction_id}"
             socketio.emit(
                 "auction_ended",
                 {
@@ -137,8 +150,10 @@ def init_auction_socket(socketio):
             )
             return
 
-        # Otherwise sync timer
-        emit("timer_update", {"remaining": remaining})
+        # -------
+        # SYNC TIMER WITH CORRECT KEY
+        # -------
+        emit("timer_update", {"remaining_seconds": remaining})
 
     # ============================================================
     # MANUAL LEAVE
@@ -147,6 +162,7 @@ def init_auction_socket(socketio):
     def leave_auction(data):
         auction_id = data.get("auction_id")
         user_id = get_current_user_id()
+
         if not auction_id or not user_id:
             return
 
@@ -162,7 +178,7 @@ def init_auction_socket(socketio):
 
         socketio.emit(
             "participant_update",
-            {"count": auction.participants},
+            {"participants": auction.participants},
             room=room,
         )
 
@@ -184,8 +200,9 @@ def init_auction_socket(socketio):
         db.session.commit()
 
         room = f"auction_{auction_id}"
+
         socketio.emit(
             "participant_update",
-            {"count": auction.participants},
+            {"participants": auction.participants},
             room=room,
         )

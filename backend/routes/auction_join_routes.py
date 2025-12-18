@@ -7,14 +7,9 @@ from datetime import datetime
 from database import db
 
 
-# ⭐ BLUEPRINT MUST BE DEFINED BEFORE ANY ROUTE
 auction_join_bp = Blueprint("auction_join", __name__)
 
-
-# ======================================================
-# JOIN AUCTION
-# ======================================================
-@auction_join_bp.route("/api/auctions/<int:auction_id>/join", methods=["POST"])
+@auction_join_bp.route("/<int:auction_id>/join", methods=["POST"])
 def join_auction(auction_id):
     user_id = get_current_user_id()
 
@@ -25,15 +20,10 @@ def join_auction(auction_id):
     if not auction:
         return jsonify({"error": "Auction not found"}), 404
 
-    # Auto status update
     auction = refresh_auction_status(auction)
-
     prop = Property.query.get(auction.property_id)
-    now = datetime.utcnow()
 
-    # ============================================================
-    # ENDED AUCTION RESPONSE
-    # ============================================================
+    # ENDED
     if auction.status == "ended":
         return jsonify({
             "success": True,
@@ -47,9 +37,7 @@ def join_auction(auction_id):
             "property_location": prop.location if prop else None,
         }), 200
 
-    # ============================================================
-    # UPCOMING AUCTION
-    # ============================================================
+    # UPCOMING
     if auction.status == "upcoming":
         remaining = get_remaining_seconds(auction)
         return jsonify({
@@ -57,8 +45,6 @@ def join_auction(auction_id):
             "auction_id": auction.id,
             "status": "upcoming",
             "remaining_seconds": remaining,
-            "start_time": auction.start_time.isoformat(),
-            "end_time": auction.end_time.isoformat(),
             "entry_fee_required": auction.entry_fee > 0,
             "property_title": prop.title if prop else None,
             "property_image": prop.image_url if prop else None,
@@ -69,9 +55,7 @@ def join_auction(auction_id):
             "participants": auction.participants
         }), 200
 
-    # ============================================================
-    # LIVE AUCTION
-    # ============================================================
+    # LIVE
     if auction.status == "live":
         remaining = get_remaining_seconds(auction)
         return jsonify({
@@ -82,8 +66,6 @@ def join_auction(auction_id):
             "current_bidder_id": auction.current_bidder_id,
             "current_bidder_name": auction.current_bidder.name if auction.current_bidder else None,
             "remaining_seconds": remaining,
-            "start_time": auction.start_time.isoformat(),
-            "end_time": auction.end_time.isoformat(),
             "entry_fee_required": auction.entry_fee > 0,
             "property_title": prop.title if prop else None,
             "property_image": prop.image_url if prop else None,
