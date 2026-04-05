@@ -2,11 +2,12 @@ from flask import Blueprint, request, jsonify
 from models.user import User
 from database import db
 import jwt
+import os
 import datetime
 
 auth_bp = Blueprint("auth", __name__)
 
-SECRET_KEY = "your-secret-key"   # same as in app.py
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key")   # same as in app.py
 
 
 # -----------------------------
@@ -59,6 +60,9 @@ def login():
         SECRET_KEY,
         algorithm="HS256"
     )
+
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
 
     return jsonify({
         "message": "Login successful",

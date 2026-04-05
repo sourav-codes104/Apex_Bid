@@ -2,6 +2,7 @@ from flask import request
 from flask_socketio import emit, join_room, leave_room
 from database import db
 from models.auction import Auction
+from models.user import User
 from utils.auth_utils import get_current_user_id
 from utils.auction_scheduler import refresh_auction_status, get_remaining_seconds
 from datetime import datetime
@@ -11,6 +12,20 @@ user_rooms = {}  # { sid: (user_id, auction_id) }
 
 
 def init_auction_socket(socketio):
+
+    # ============================================================
+    # HANDLE SOCKET CONNECT
+    # ============================================================
+    @socketio.on("connect")
+    def handle_connect():
+        user_id = get_current_user_id()
+        print(f"🔌 Socket connected: SID={request.sid}, User={user_id}")
+        
+        if not user_id:
+            print(f"❌ Connection rejected: No valid token")
+            return False  # Reject connection
+        
+        return True
 
     # ============================================================
     # JOIN AUCTION
@@ -101,6 +116,10 @@ def init_auction_socket(socketio):
         auction.current_bidder_id = user_id
         db.session.commit()
 
+        # Fetch the bidder's name
+        bidder = User.query.get(user_id)
+        bidder_name = bidder.name if bidder else None
+
         room = f"auction_{auction_id}"
 
         # -------
@@ -112,9 +131,7 @@ def init_auction_socket(socketio):
                 "auction_id": auction_id,
                 "current_bid": bid_amount,
                 "current_bidder_id": user_id,
-                "current_bidder_name": (
-                    auction.current_bidder.name if auction.current_bidder else None
-                ),
+                "current_bidder_name": bidder_name,
             },
             room=room,
         )

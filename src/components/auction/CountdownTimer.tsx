@@ -16,8 +16,8 @@ const CountdownTimer = () => {
     if (auction?.remainingSeconds != null) {
       setLocalTime(auction.remainingSeconds);
     }
-  }, [auction?.id]); 
-  // ❗ Trigger ONLY when auction changes (NOT on remainingSeconds)
+  }, [auction?.remainingSeconds]);
+  // ❗ Trigger when backend updates the remaining seconds
 
   // ----------------------------------------------
   // LOCAL countdown

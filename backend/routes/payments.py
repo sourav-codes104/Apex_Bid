@@ -48,10 +48,16 @@ def create_order():
         "order_note": f"Auction Entry Fee for Auction {auction_id}"
     }
 
+    client_id = os.getenv("CASHFREE_CLIENT_ID")
+    client_secret = os.getenv("CASHFREE_CLIENT_SECRET")
+
+    if not client_id or not client_secret:
+        return jsonify({"error": "Cashfree credentials are not configured"}), 500
+
     headers = {
         "Content-Type": "application/json",
-        "x-client-id": os.getenv("CASHFREE_CLIENT_ID"),
-        "x-client-secret": os.getenv("CASHFREE_CLIENT_SECRET"),
+        "x-client-id": client_id,
+        "x-client-secret": client_secret,
         "x-api-version": "2022-09-01"
     }
 
@@ -90,10 +96,16 @@ def verify_payment():
     if not user_id:
         return jsonify({"error": "Unauthorized"}), 401
 
+    client_id = os.getenv("CASHFREE_CLIENT_ID")
+    client_secret = os.getenv("CASHFREE_CLIENT_SECRET")
+
+    if not client_id or not client_secret:
+        return jsonify({"error": "Cashfree credentials are not configured"}), 500
+
     headers = {
         "Content-Type": "application/json",
-        "x-client-id": os.getenv("CASHFREE_CLIENT_ID"),
-        "x-client-secret": os.getenv("CASHFREE_CLIENT_SECRET"),
+        "x-client-id": client_id,
+        "x-client-secret": client_secret,
         "x-api-version": "2022-09-01"
     }
 
@@ -126,11 +138,6 @@ def verify_payment():
             status="PAID"
         )
         db.session.add(payment)
-
-        auction = Auction.query.get(auction_id)
-        if auction:
-            auction.participants += 1
-
         db.session.commit()
 
     return jsonify({

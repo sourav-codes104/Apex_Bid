@@ -5,12 +5,25 @@ import axios from "axios";
 // TYPES
 // --------------------------------------
 export interface AuctionState {
+  id?: number;
   auctionId: number | null;
+  property_id?: number;
+  owner_id?: number;
+  property_title?: string;
+  starting_price?: number;
+  entry_fee?: number;
+  entry_fee_required?: boolean;
+  start_time?: string;
+  end_time?: string;
+
   status: "upcoming" | "live" | "ended" | null;
 
   currentBid: number;
+  current_bid?: number;
   currentBidderId: number | null;
-  currentBidderName?: string | null;   // ⭐ ADDED
+  current_bidder_id?: number | null;
+  currentBidderName?: string | null;
+  current_bidder_name?: string | null;
 
   remainingSeconds: number;
   participants: number;
@@ -106,14 +119,26 @@ export const useAuctionStore = create<AuctionStore>((set, get) => ({
   setAuctionInfo: (data) => {
     set({
       auction: {
-        auctionId: data.auction_id,
+        id: data.id ?? data.auction_id,
+        auctionId: data.auction_id ?? data.id ?? null,
+        property_id: data.property_id,
+        owner_id: data.owner_id,
+        property_title: data.property_title ?? data.property?.title,
+        starting_price: data.starting_price,
+        entry_fee: data.entry_fee ?? 0,
+        entry_fee_required: data.entry_fee_required ?? false,
+        start_time: data.start_time,
+        end_time: data.end_time,
         status: data.status,
 
-        currentBid: data.current_bid ?? 0,
-        currentBidderId: data.current_bidder_id ?? null,
-        currentBidderName: data.current_bidder_name ?? null,   // ⭐ ADDED
+        currentBid: data.current_bid ?? data.currentBid ?? 0,
+        current_bid: data.current_bid ?? data.currentBid ?? 0,
+        currentBidderId: data.current_bidder_id ?? data.currentBidderId ?? null,
+        current_bidder_id: data.current_bidder_id ?? data.currentBidderId ?? null,
+        currentBidderName: data.current_bidder_name ?? data.currentBidderName ?? null,
+        current_bidder_name: data.current_bidder_name ?? data.currentBidderName ?? null,
 
-        remainingSeconds: data.remaining_seconds ?? 0,
+        remainingSeconds: data.remaining_seconds ?? data.remainingSeconds ?? 0,
         participants: data.participants ?? 1,
 
         bids: [],
@@ -143,14 +168,17 @@ export const useAuctionStore = create<AuctionStore>((set, get) => ({
       auction: {
         ...a,
         currentBid: amount,
+        current_bid: amount,
         currentBidderId: bidderId,
-        currentBidderName: bidderName || null,   // ⭐ ADDED
+        current_bidder_id: bidderId,
+        currentBidderName: bidderName || null,
+        current_bidder_name: bidderName || null,
 
         bids: [
           {
             amount,
             userId: bidderId,
-            userName: bidderName || null,         // ⭐ ADDED
+            userName: bidderName || null,
             timestamp: new Date().toISOString(),
           },
           ...a.bids,
@@ -182,8 +210,11 @@ export const useAuctionStore = create<AuctionStore>((set, get) => ({
         status: "ended",
         remainingSeconds: 0,
         currentBid: finalBid,
+        current_bid: finalBid,
         currentBidderId: winnerId,
-        currentBidderName: winnerName,   // ⭐ ADDED
+        current_bidder_id: winnerId,
+        currentBidderName: winnerName,
+        current_bidder_name: winnerName,
       },
     });
   },

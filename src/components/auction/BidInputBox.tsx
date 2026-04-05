@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getAuctionSocket } from "@/socket/auctionSocket";
 import { useAuctionStore } from "@/stores/auctionStore";
 import { useAuthStore } from "@/stores/authStore";
+import { toast } from "sonner";
 
 const BidInputBox = () => {
   const auction = useAuctionStore((s) => s.auction);
@@ -14,27 +15,45 @@ const BidInputBox = () => {
 
   const currentBid = auction.currentBid ?? auction.current_bid ?? 0;
 
+  useEffect(() => {
+    const socket = getAuctionSocket();
+    if (!socket) return;
+
+    // Listen for bid errors
+    const handleError = (err: any) => {
+      console.error("❌ Bid error:", err);
+      toast.error(err?.error || "Bid placement failed");
+      setLoading(false);
+    };
+
+    socket.on("error", handleError);
+
+    return () => {
+      socket.off("error", handleError);
+    };
+  }, []);
+
   const handleBid = () => {
     if (!user) {
-      alert("Please login to bid");
+      toast.error("Please login to bid");
       return;
     }
 
     const bidValue = Number(bidAmount);
 
     if (!bidValue || isNaN(bidValue)) {
-      alert("Enter a valid bid amount");
+      toast.error("Enter a valid bid amount");
       return;
     }
 
     if (bidValue <= currentBid) {
-      alert("Your bid must be higher than current bid");
+      toast.error("Your bid must be higher than current bid");
       return;
     }
 
     const socket = getAuctionSocket();
     if (!socket) {
-      alert("Socket not connected");
+      toast.error("Socket not connected");
       return;
     }
 
@@ -49,7 +68,7 @@ const BidInputBox = () => {
     console.log("💰 Sent bid:", bidValue);
 
     setBidAmount("");
-    setTimeout(() => setLoading(false), 500);
+    setTimeout(() => setLoading(false), 1000);
   };
 
   return (

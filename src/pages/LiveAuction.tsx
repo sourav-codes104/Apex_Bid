@@ -25,7 +25,9 @@ const LiveAuction = () => {
   const { id } = useParams();
   const setAuctionInfo = useAuctionStore((s) => s.setAuctionInfo);
   const updateParticipants = useAuctionStore((s) => s.updateParticipants);
+  const updateTimer = useAuctionStore((s) => s.updateTimer);
   const addBidToHistory = useAuctionStore((s) => s.addBidToHistory);
+  const setAuctionEnded = useAuctionStore((s) => s.setAuctionEnded);
   const auction = useAuctionStore((s) => s.auction);
   const user = useAuthStore((s) => s.user);
 
@@ -42,9 +44,14 @@ const LiveAuction = () => {
         setAuctionInfo(res.data);
 
         // Check if entry fee is 0 or not required
+        const token = localStorage.getItem("token");
         if (!res.data.entry_fee_required || res.data.entry_fee === 0) {
-          setHasPaid(true);
-          await joinAuctionIfNeeded(res.data);
+          if (token) {
+            setHasPaid(true);
+            await joinAuctionIfNeeded(res.data);
+          } else {
+            setHasPaid(false);
+          }
         }
       } catch (err) {
         console.error("Failed to load auction:", err);
@@ -112,47 +119,40 @@ const LiveAuction = () => {
 
       // 2. INITIALIZE SOCKET ONLY AFTER API SUCCESS
       const socket = connectAuctionSocket(currentToken);
+      if (!socket) {
+        console.error("Failed to create socket");
+        return;
+      }
+      
       socketRef.current = socket;
 
-      socket.on("connect", () => {
-        console.log("🟢 Socket connected! Sending join_auction for ID:", id);
+      // Wait for socket to connect, then emit join_auction
+      const handleConnect = () => {
+        console.log("Socket connected, emitting join_auction for ID:", id);
         socket.emit("join_auction", { auction_id: Number(id) });
-      });
+      };
 
-      // --- LISTENERS ---
-      socket.on("participant_update", (payload: any) => {
-        if (payload && typeof payload.participants !== "undefined") {
-          updateParticipants(payload.participants);
-        }
-      });
+      // If socket is already connected, emit immediately
+      if (socket.connected) {
+        handleConnect();
+      } else {
+        // Wait for connection
+        socket.once("connect", handleConnect);
+      }
 
-      socket.on("new_bid", (payload: any) => {
-        if (!payload) return;
-        setAuctionInfo({
-          ...data,
-          current_bid: payload.current_bid,
-          current_bidder_id: payload.current_bidder_id,
-          current_bidder_name: payload.current_bidder_name,
-        });
-        addBidToHistory(payload);
-      });
-
-      socket.on("timer_update", (payload: any) => {
-        setAuctionInfo((prev: any) => ({
-          ...prev,
-          remaining_seconds: payload.remaining_seconds,
-        }));
-      });
-
-      socket.on("auction_ended", (payload: any) => {
-        setAuctionInfo((prev: any) => ({ ...prev, status: "ended" }));
-      });
-
-      socket.on("connect_error", (err: any) => {
-        console.error("❌ Socket connect error:", err);
+      // Listen for auction info response
+      socket.once("auction_info", (payload: any) => {
+        console.log("Received auction_info:", payload);
+        setAuctionInfo(payload);
       });
     } catch (err: any) {
-      console.error("❌ Join auction flow failed:", err.response?.data || err.message);
+      console.error("❌ Join auction flow failed:");
+      console.error("Error object:", err);
+      console.error("Error message:", err.message);
+      console.error("Response:", err.response);
+      console.error("Status:", err.response?.status);
+      console.error("Data:", err.response?.data);
+      if (err.code) console.error("Error code:", err.code);
     }
   };
 

@@ -4,7 +4,7 @@ from models.auction import Auction
 from models.property import Property
 from models.payment_model import Payment
 from utils.auth_utils import get_current_user_id
-from utils.auction_scheduler import refresh_auction_status
+from utils.auction_scheduler import refresh_auction_status, get_remaining_seconds
 from datetime import datetime
 
 auction_bp = Blueprint("auctions", __name__)
@@ -90,6 +90,7 @@ def get_all_auctions():
             "owner_id": refreshed.owner_id,
             "starting_price": refreshed.starting_price,
             "entry_fee": refreshed.entry_fee,
+            "entry_fee_required": refreshed.entry_fee > 0,
             "status": refreshed.status,
             "start_time": refreshed.start_time.isoformat(),
             "end_time": refreshed.end_time.isoformat(),
@@ -126,6 +127,7 @@ def get_auction(id):
         "owner_id": a.owner_id,
         "starting_price": a.starting_price,
         "entry_fee": a.entry_fee,
+        "entry_fee_required": a.entry_fee > 0,
         "status": a.status,
         "start_time": a.start_time.isoformat(),
         "end_time": a.end_time.isoformat(),
@@ -149,15 +151,16 @@ def join_auction(auction_id):
     if not auction:
         return jsonify({"error": "Auction not found"}), 404
 
-    # 🔥 PAYMENT CHECK - DO NOT ALLOW JOIN IF ENTRY FEE NOT PAID
-    payment = Payment.query.filter_by(
-        auction_id=auction_id,
-        user_id=user_id,
-        status="PAID"
-    ).first()
+    # 🔥 PAYMENT CHECK - DO NOT ALLOW JOIN IF ENTRY FEE IS REQUIRED AND NOT PAID
+    if auction.entry_fee > 0:
+        payment = Payment.query.filter_by(
+            auction_id=auction_id,
+            user_id=user_id,
+            status="PAID"
+        ).first()
 
-    if not payment:
-        return jsonify({"error": "Entry fee not paid"}), 403
+        if not payment:
+            return jsonify({"error": "Entry fee not paid"}), 403
 
     # Refresh status
     old_status = auction.status
@@ -166,19 +169,17 @@ def join_auction(auction_id):
     if auction.status != old_status:
         db.session.commit()
 
-    # Increase participants
-    auction.participants += 1
-    db.session.commit()
-
     return jsonify({
         "id": auction.id,
         "property_id": auction.property_id,
         "owner_id": auction.owner_id,
         "starting_price": auction.starting_price,
         "entry_fee": auction.entry_fee,
+        "entry_fee_required": auction.entry_fee > 0,
         "status": auction.status,
         "start_time": auction.start_time.isoformat(),
         "end_time": auction.end_time.isoformat(),
+        "remaining_seconds": get_remaining_seconds(auction),
         "current_bid": auction.current_bid,
         "current_bidder_id": auction.current_bidder_id,
         "current_bidder_name": auction.current_bidder.name if auction.current_bidder else None,
