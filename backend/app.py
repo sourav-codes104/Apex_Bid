@@ -1,11 +1,13 @@
+import eventlet
+eventlet.monkey_patch()  # 🔥 REQUIRED: Must be the absolute first thing
+
+import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 from database import db, socketio
 from dotenv import load_dotenv
 
-import eventlet
-eventlet.monkey_patch()   # 🔥 REQUIRED FOR WEBSOCKETS
-
+# Load environment variables
 load_dotenv()
 
 # Routes
@@ -19,29 +21,38 @@ from routes.payment_check import payment_check_bp
 # Socket events
 from sockets.auction_socket import init_auction_socket
 
-
 def create_app():
     app = Flask(__name__)
+    # Ensure this matches exactly what is in your auth_utils.py
     app.config["SECRET_KEY"] = "your-secret-key"
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///database.db"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     db.init_app(app)
 
-    # ALLOW ALL ORIGINS DURING DEV FOR SOCKET.IO
+    # List of allowed frontend origins
+    allowed_origins = [
+        "http://localhost:8080", 
+        "http://127.0.0.1:8080",
+        "http://localhost:5173", 
+        "http://127.0.0.1:5173"
+    ]
+
+    # 1. Update CORS to handle Credentials and specific Origins
     CORS(
         app,
         supports_credentials=True,
-        resources={r"/*": {"origins": "*"}},
+        resources={r"/*": {"origins": allowed_origins}},
         allow_headers=["Content-Type", "Authorization"],
         expose_headers=["Authorization"],
+        methods=["GET", "POST", "OPTIONS"]
     )
 
-    # SOCKET.IO → ALLOW ALL ORIGINS FOR DEV
+    # 2. Update Socket.IO to match the allowed origins
     socketio.init_app(
         app,
-        cors_allowed_origins="*",
-        async_mode="eventlet",     # 🔥 REQUIRED
+        cors_allowed_origins=allowed_origins,
+        async_mode="eventlet",
         ping_timeout=60,
         ping_interval=25,
     )
@@ -68,10 +79,12 @@ if __name__ == "__main__":
     with app.app_context():
         db.create_all()
 
-    # USE EVENTLET SERVER, NOT WERKZEUG
+    # 🔥 CHANGE: use_reloader=False is critical on Windows with Eventlet
+    # to prevent "Working outside of application context" errors.
     socketio.run(
         app,
         host="127.0.0.1",
         port=5000,
-        debug=True
+        debug=True,
+        use_reloader=False
     )
